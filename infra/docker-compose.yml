@@ -61,6 +61,35 @@ services:
         limits:
           memory: 512M
 
+  # App services live under the "app" profile so `docker compose up` still
+  # brings up only data services. Full stack: `docker compose --profile app up`.
+  rag-backend:
+    build: ../backend
+    container_name: rag_backend
+    profiles: ["app"]
+    depends_on: [postgres, redis, qdrant]
+    env_file: ../backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://rag_admin:rag_dev_password@postgres:5432/rag_platform
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      REDIS_URL: redis://redis:6379/0
+      CACHE_ENABLED: "true"
+      HYBRID_ENABLED: "true"
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+
+  rag-frontend:
+    build: ../frontend
+    container_name: rag_frontend
+    profiles: ["app"]
+    depends_on: [rag-backend]
+    ports:
+      - "8080:80"
+
 volumes:
   postgres_data:
   redis_data:

@@ -43,6 +43,11 @@ class VectorStore(abc.ABC):
         """Return list of dicts with keys: id, score, payload."""
         ...
 
+    @abc.abstractmethod
+    def delete(self, ids: list[uuid.UUID]) -> None:
+        """Remove points by id (idempotent — unknown ids are ignored)."""
+        ...
+
 
 class QdrantVectorStore(VectorStore):
     """Qdrant implementation of VectorStore."""
@@ -117,3 +122,12 @@ class QdrantVectorStore(VectorStore):
             }
             for hit in response.points
         ]
+
+    def delete(self, ids: list[uuid.UUID]) -> None:
+        """Delete points by id. No-op on empty list; unknown ids are ignored."""
+        if not ids:
+            return
+        self._client.delete(
+            collection_name=self.collection_name,
+            points_selector=[str(pid) for pid in ids],
+        )

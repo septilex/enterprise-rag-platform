@@ -1,0 +1,6 @@
+apiVersion: v2
+name: rag-platform
+description: Production-grade, self-hosted RAG platform backend (Kubernetes-native)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

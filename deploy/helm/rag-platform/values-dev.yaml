@@ -1,0 +1,15 @@
+replicaCount: 1
+autoscaling:
+  enabled: false
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { cpu: 500m, memory: 512Mi }
+env:
+  CACHE_ENABLED: "false"
+  HYBRID_ENABLED: "false"
+ingress:
+  enabled: false
+networkPolicy:
+  enabled: false
+frontend:
+  replicaCount: 1

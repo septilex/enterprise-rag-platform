@@ -1,0 +1,76 @@
+# DEV dependency services (Postgres, Redis, Qdrant) for a self-contained
+# first-deploy proof. Ephemeral (emptyDir) — NOT production. In prod use managed
+# DBs or operators with persistent volumes, and point chart env at them.
+# Service names (postgres/redis/qdrant) match the chart's default env.
+apiVersion: v1
+kind: Service
+metadata: { name: postgres }
+spec:
+  selector: { app: postgres }
+  ports: [{ port: 5432, targetPort: 5432 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: postgres }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: postgres } }
+  template:
+    metadata: { labels: { app: postgres } }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - { name: POSTGRES_USER, value: rag_admin }
+            - { name: POSTGRES_PASSWORD, value: rag_dev_password }
+            - { name: POSTGRES_DB, value: rag_platform }
+          ports: [{ containerPort: 5432 }]
+          volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]
+      volumes: [{ name: data, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: redis }
+spec:
+  selector: { app: redis }
+  ports: [{ port: 6379, targetPort: 6379 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: redis }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: redis } }
+  template:
+    metadata: { labels: { app: redis } }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports: [{ containerPort: 6379 }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: qdrant }
+spec:
+  selector: { app: qdrant }
+  ports:
+    - { name: http, port: 6333, targetPort: 6333 }
+    - { name: grpc, port: 6334, targetPort: 6334 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: qdrant }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: qdrant } }
+  template:
+    metadata: { labels: { app: qdrant } }
+    spec:
+      containers:
+        - name: qdrant
+          image: qdrant/qdrant:latest
+          ports: [{ containerPort: 6333 }, { containerPort: 6334 }]
+          volumeMounts: [{ name: storage, mountPath: /qdrant/storage }]
+      volumes: [{ name: storage, emptyDir: {} }]

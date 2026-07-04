@@ -1,0 +1,38 @@
+{{- if .Values.ingress.enabled }}
+# TLS-terminating ingress (SEC-03: TLS enforced on all external endpoints).
+# Routes the host to the frontend, whose nginx proxies /api/* to the backend.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "rag-platform.fullname" . }}
+  labels: {{- include "rag-platform.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.tlsSecret }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                {{- if .Values.frontend.enabled }}
+                name: {{ include "rag-platform.fullname" . }}-frontend
+                port:
+                  number: 80
+                {{- else }}
+                name: rag-backend
+                port:
+                  number: 8000
+                {{- end }}
+{{- end }}

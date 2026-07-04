@@ -1,0 +1,13 @@
+replicaCount: 3
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 65
+resources:
+  requests: { cpu: 500m, memory: 1Gi }
+  limits: { cpu: "2", memory: 2Gi }
+env:
+  CACHE_ENABLED: "true"
+  HYBRID_ENABLED: "true"
+  RERANK_ENABLED: "true"

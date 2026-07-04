@@ -1,0 +1,6 @@
+# Optional: cross-encoder reranking (RET-03). Pulls torch — heavy, CPU or GPU.
+# Only needed when RERANK_ENABLED=true. Install into a dedicated reranker image
+# or worker, NOT the default lightweight API image.
+#   pip install -r requirements.txt -r requirements-rerank.txt
+-r requirements.txt
+sentence-transformers

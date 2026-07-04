@@ -1,0 +1,92 @@
+# Default values. Override per environment with values-dev/staging/prod.yaml (INFRA-01).
+replicaCount: 2
+
+image:
+  repository: rag-platform
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8000
+
+# Resource requests/limits are required on every container (INFRA-08).
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+# Horizontal Pod Autoscaler (INFRA-02).
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Zero-downtime rolling updates (INFRA-04).
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+# Non-secret config -> env. Secrets come from an existing Secret (INFRA-06).
+env:
+  DATABASE_URL: "postgresql+psycopg2://rag_admin:rag_dev_password@postgres:5432/rag_platform"
+  QDRANT_HOST: "qdrant"
+  QDRANT_PORT: "6333"
+  REDIS_URL: "redis://redis:6379/0"
+  CACHE_ENABLED: "true"
+  HYBRID_ENABLED: "true"
+  RERANK_ENABLED: "false"
+
+# Name of a pre-created Secret holding OPENAI_API_KEY, API_KEYS, PRINCIPALS_JSON.
+existingSecret: rag-platform-secrets
+
+# Dev-only: create the secret from these values (set false in staging/prod).
+createSecret: false
+secrets:
+  openaiApiKey: ""
+  apiKeys: ""
+  principalsJson: ""
+
+# Alembic migration hook Job (INFRA-07).
+migrations:
+  enabled: true
+
+probes:
+  liveness:
+    path: /health
+  readiness:
+    path: /ready
+
+# Web chat frontend (UI). Served by nginx, proxies /api -> backend.
+frontend:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: rag-platform-frontend
+    tag: "0.1.0"
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 128Mi }
+
+# TLS-terminating ingress (SEC-03). Provide a cert Secret (cert-manager/ESO).
+ingress:
+  enabled: true
+  className: nginx
+  host: rag.example.com
+  tlsSecret: rag-platform-tls
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+
+# Restrict inter-pod traffic to the backend (defense in depth).
+networkPolicy:
+  enabled: true
+  ingressControllerNamespace: ingress-nginx

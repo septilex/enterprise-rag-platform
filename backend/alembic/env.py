@@ -16,6 +16,17 @@ config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
 target_metadata = Base.metadata
 
+# Indexes created via raw SQL in migrations (functional/expression indexes that
+# have no ORM representation) must be excluded from autogenerate, otherwise
+# `alembic check`/revision --autogenerate would propose dropping them.
+_AUTOGEN_EXCLUDED_INDEXES = {"ix_chunks_content_fts"}
+
+
+def _include_object(obj, name, type_, reflected, compare_to):
+    if type_ == "index" and name in _AUTOGEN_EXCLUDED_INDEXES:
+        return False
+    return True
+
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
@@ -25,6 +36,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         compare_type=True,
+        include_object=_include_object,
     )
 
     with context.begin_transaction():
@@ -44,6 +56,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
+            include_object=_include_object,
         )
 
         with context.begin_transaction():

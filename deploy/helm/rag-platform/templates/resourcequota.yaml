@@ -1,0 +1,13 @@
+{{- if .Values.resourceQuota.enabled }}
+# Namespace-level resource quota, configurable per tenant (INFRA-08). Deploy the
+# chart per-tenant namespace and set limits here; the API server rejects any
+# workload that would breach the quota.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: {{ include "rag-platform.fullname" . }}-quota
+  labels: {{- include "rag-platform.labels" . | nindent 4 }}
+spec:
+  hard:
+    {{- toYaml .Values.resourceQuota.hard | nindent 4 }}
+{{- end }}

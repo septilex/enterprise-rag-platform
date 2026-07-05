@@ -87,6 +87,26 @@ worker:
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: 500m, memory: 512Mi }
+  # HPA on CPU + ingestion queue depth (INFRA-02). Queue-depth scaling needs
+  # prometheus-adapter exposing rag_ingestion_queue_depth as an external metric.
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 75
+    targetQueueDepthPerReplica: "20"
+  # INFRA-09: optional GPU scheduling for self-hosted embedding/reranking. When
+  # disabled (default) the worker runs CPU-only and falls back to the external
+  # OpenAI-compatible API — no GPU required.
+  gpu:
+    enabled: false
+    count: 1
+    nodeSelector:
+      nvidia.com/gpu.present: "true"
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
 
 # Ingestion scheduler (ING-03). Enqueues due connector syncs.
 scheduler:
@@ -94,6 +114,30 @@ scheduler:
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: 200m, memory: 256Mi }
+
+# Scheduled backup + restore-check (INFRA-03). Disabled by default; enable in
+# prod with a valid backup image (postgres+aws-cli), plain DB URL, and S3 bucket.
+backup:
+  enabled: false
+  schedule: "0 */6 * * *"          # every 6h; RPO <= 15m needs a shorter cadence
+  image: "ghcr.io/rag-platform/backup:0.1.0"   # image with pg_dump + curl + aws
+  databaseUrlPlain: "postgresql://rag_admin:rag_dev_password@postgres:5432/rag_platform"
+  qdrantCollection: "rag_chunks"
+  s3Bucket: ""                      # e.g. my-backups (empty = local dump only)
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+# Namespace ResourceQuota, configurable per tenant (INFRA-08). Deploy the chart
+# per tenant namespace and tune these caps.
+resourceQuota:
+  enabled: false
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    pods: "50"
 
 # Optional: create the app Secret from an external store via External Secrets
 # Operator (SEC-03/INFRA-06) instead of a static K8s Secret.

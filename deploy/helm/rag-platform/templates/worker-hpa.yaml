@@ -1,0 +1,36 @@
+{{- if and .Values.worker.enabled .Values.worker.autoscaling.enabled }}
+# Worker HPA scaling on CPU + ingestion QUEUE DEPTH (INFRA-02). The external
+# metric `rag_ingestion_queue_depth` is emitted at /metrics; expose it to the
+# HPA via prometheus-adapter (see deploy/README.md). Falls back to CPU-only if
+# the external metric is unavailable.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "rag-platform.fullname" . }}-worker
+  labels: {{- include "rag-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "rag-platform.fullname" . }}-worker
+  minReplicas: {{ .Values.worker.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.worker.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.worker.autoscaling.targetCPUUtilizationPercentage }}
+    - type: External
+      external:
+        metric:
+          name: rag_ingestion_queue_depth
+          selector:
+            matchLabels:
+              queue: incremental
+        target:
+          type: AverageValue
+          averageValue: {{ .Values.worker.autoscaling.targetQueueDepthPerReplica | quote }}
+{{- end }}

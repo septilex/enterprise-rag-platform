@@ -55,7 +55,8 @@ from app.services.embedder import OpenAIEmbedder
 from app.services.generation import generate_answer, stream_answer
 from app.services.llm import OpenAILLM
 from app.services.vector_store import QdrantVectorStore
-from app.observability import log_query, audit_log, record_query
+from app.observability import log_query, audit_log, record_query, current_request_id
+from app.services import llm_observability
 from app.tracing import span
 from app.services.cache import build_cache
 from app.services.embedder import CachedEmbedder
@@ -822,6 +823,7 @@ def chat(
             metadata_filter=payload.metadata_filter,
         )
 
+    _latency_ms = (time.perf_counter() - start) * 1000
     log_query(
         tenant_id=payload.tenant_id,
         collection_id=payload.collection_id,
@@ -829,8 +831,15 @@ def chat(
         retrieved_chunk_ids=[c["chunk_id"] for c in citations],
         grounded=grounded,
         answer=answer,
-        latency_ms=(time.perf_counter() - start) * 1000,
+        latency_ms=_latency_ms,
     )
+    # MON-09: export the generation to the external LLM-observability tool
+    # (no-op unless configured). Best-effort; never affects the response.
+    llm_observability.get_adapter().record_generation(
+        request_id=current_request_id(), tenant_id=payload.tenant_id,
+        collection_id=payload.collection_id, query=payload.query, answer=answer,
+        grounded=grounded, citations=[str(c["chunk_id"]) for c in citations],
+        latency_ms=round(_latency_ms, 2))
 
     citation_items = [Citation(**c) for c in citations]
 

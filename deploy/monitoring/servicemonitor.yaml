@@ -1,0 +1,20 @@
+# Prometheus Operator ServiceMonitor — scrapes the API /metrics (MON-02).
+# Apply after installing kube-prometheus-stack. `release: kube-prometheus-stack`
+# label makes the operator pick it up (match your Prometheus serviceMonitorSelector).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: rag-platform
+  namespace: rag
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: ["rag"]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rag-platform
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import abc
 import hashlib
+import logging
 import os
+import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -20,6 +22,60 @@ from sqlalchemy.orm import Session
 from app.services import ingestion
 from app.services.embedder import Embedder
 from app.services.vector_store import VectorStore
+
+_log = logging.getLogger("rag.connectors")
+
+# Transient error classes worth retrying for cloud connectors (rate limits /
+# throttling / 5xx / network blips). Kept as a small helper so the real S3 and
+# Confluence adapters degrade gracefully instead of failing a whole sync.
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
+def _with_retry(fn, *, attempts: int = 4, base_delay: float = 0.5, what: str = "call"):
+    """Call ``fn`` with exponential backoff on transient/rate-limit errors.
+
+    ``fn`` may raise; if the exception exposes a status code (httpx/botocore) in
+    _RETRYABLE_STATUS, or looks like a rate-limit/throttling error, we back off
+    and retry. Non-retryable errors propagate immediately.
+    """
+    last: Exception | None = None
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001
+            status = _extract_status(exc)
+            retryable = status in _RETRYABLE_STATUS or _looks_throttled(exc)
+            last = exc
+            if not retryable or i == attempts - 1:
+                raise
+            delay = base_delay * (2 ** i) + _retry_after(exc)
+            _log.warning("%s transient error (%s), retry %s/%s in %.1fs",
+                         what, status or type(exc).__name__, i + 1, attempts, delay)
+            time.sleep(delay)
+    if last is not None:  # pragma: no cover
+        raise last
+
+
+def _extract_status(exc: Exception) -> int | None:
+    resp = getattr(exc, "response", None)
+    code = getattr(resp, "status_code", None)
+    if code is None and isinstance(resp, dict):  # botocore
+        code = resp.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    return int(code) if code else None
+
+
+def _looks_throttled(exc: Exception) -> bool:
+    s = str(exc).lower()
+    return any(k in s for k in ("throttl", "rate exceeded", "slowdown", "too many requests"))
+
+
+def _retry_after(exc: Exception) -> float:
+    resp = getattr(exc, "response", None)
+    headers = getattr(resp, "headers", None) or {}
+    try:
+        return float(headers.get("Retry-After", 0))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 @dataclass
@@ -263,7 +319,9 @@ class S3Connector(Connector):
                 key = obj["Key"]
                 if not key.lower().endswith(self.extensions):
                     continue
-                body = client.get_object(Bucket=self.bucket, Key=key)["Body"].read()
+                body = _with_retry(
+                    lambda k=key: client.get_object(Bucket=self.bucket, Key=k)["Body"].read(),
+                    what=f"s3 get_object {key}")
                 content = body.decode("utf-8", errors="replace")
                 if content.strip():
                     yield SourceDocument(
@@ -305,12 +363,16 @@ class ConfluenceConnector(Connector):
         start = 0
         with httpx.Client(timeout=15) as client:
             while True:
-                r = client.get(
-                    f"{self.base_url}/wiki/rest/api/content",
-                    params={"spaceKey": self.space_key, "expand": "body.storage,version",
-                            "start": start, "limit": self.limit},
-                    auth=auth, headers=headers)
-                r.raise_for_status()
+                def _get(s=start):
+                    resp = client.get(
+                        f"{self.base_url}/wiki/rest/api/content",
+                        params={"spaceKey": self.space_key,
+                                "expand": "body.storage,version",
+                                "start": s, "limit": self.limit},
+                        auth=auth, headers=headers)
+                    resp.raise_for_status()  # 429/5xx -> retried by _with_retry
+                    return resp
+                r = _with_retry(_get, what="confluence content")
                 data = r.json()
                 for page in data.get("results", []):
                     body = page.get("body", {}).get("storage", {}).get("value", "")

@@ -1,6 +1,6 @@
 # Requirements Coverage — RAG Platform v1.0
 
-Status of every PDF requirement against the backend. **129 tests green.**
+Status of every PDF requirement against the backend. **137 tests green.**
 Feature flags default OFF to preserve baseline behavior; production values files
 turn them on. Flags: `HYBRID_ENABLED`, `RERANK_ENABLED`, `CACHE_ENABLED`,
 `SEMANTIC_CACHE_ENABLED`, `QUERY_TRANSFORM`, `MULTI_HOP_ENABLED`, `API_KEYS`,
@@ -12,13 +12,13 @@ Legend: ✅ done+tested · 🟡 partial · ⬜ not started (infra/frontend)
 | ID | Status | Evidence |
 |----|--------|----------|
 | INFRA-01 | ✅ | `deploy/helm/rag-platform` chart + values-dev/staging/prod |
-| INFRA-02 | ✅ | `templates/hpa.yaml` (CPU+memory HPA) |
+| INFRA-02 | ✅ | API HPA (CPU+memory) + **worker HPA on queue depth** (`worker-hpa.yaml`, external `rag_ingestion_queue_depth`) |
 | INFRA-03 | 🟡 | volumes + backup/restore runbook (`deploy/README.md`); automation TODO |
 | INFRA-04 | ✅ | `strategy` RollingUpdate maxUnavailable:0 |
 | INFRA-05 | ✅ | `/health` liveness + `/ready` readiness, `test_probes.py` |
 | INFRA-06 | ✅ | `existingSecret` (secretRef), `.env` gitignored |
 | INFRA-07 | ✅ | Alembic pre-upgrade hook Job (`migrate-job.yaml`) |
-| INFRA-08 | ✅ | resources on container in `values.yaml` |
+| INFRA-08 | ✅ | per-container requests/limits + **per-tenant `ResourceQuota`** (`resourcequota.yaml`) |
 | INFRA-09 | ⬜ | GPU node pools (cluster-level) |
 | INFRA-10 | 🟡 | ING-10 reindex + DR via backups (procedure) |
 
@@ -27,7 +27,7 @@ Legend: ✅ done+tested · 🟡 partial · ⬜ not started (infra/frontend)
 |----|--------|----------|
 | ING-01 | ✅ | `Source` model + `services/ingestion_runs.py` orchestrator (manual_upload/api_text/webhook/connector = source types) + `services/connectors.py` registry; `/sources`; `test_ingestion_platform.py` |
 | ING-02 | ✅ | delta re-index in `ingest_text_document`, `test_ingestion.py` |
-| ING-03 | ✅ | `POST /ingest/webhook` + connector `POST /sources/{id}/sync` (queued to worker); cron pending; `test_connector_platform.py` |
+| ING-03 | ✅ | webhook + on-demand sync + **cron scheduler** (`app/scheduler.py`, due-detection, idempotent enqueue, Helm/compose); `test_production_hardening.py` |
 | ING-04 | ✅ | content-hash idempotency, `test_ingestion.py` |
 | ING-05 | ✅ | per-collection chunking, `test_chunking.py` |
 | ING-06 | ✅ | metadata tagging + payload, `test_metadata_filter.py` |
@@ -68,9 +68,9 @@ Legend: ✅ done+tested · 🟡 partial · ⬜ not started (infra/frontend)
 | MON-01 | ✅ | OTel spans + OTLP/console exporter wiring (`tracing.py`); live Jaeger view needs a collector |
 | MON-02 | ✅ | `/metrics` + `/admin/system/status` (worker heartbeat, queue/DLQ depth, ingestion success rate, source health) + **Operations dashboard UI**; `test_platform_metrics.py`, `test_ops_reliability.py` |
 | MON-03 | ✅ | `/eval/scorecard`, `test_evaluation.py` |
-| MON-04 | ✅ | structured query log + PII redaction (`redact_pii`), `test_pii_and_tracing_export.py` |
+| MON-04 | ✅ | structured query log + PII redaction + **JSON log formatter** (`LOG_FORMAT=json`) + request-id correlation; `test_pii_and_tracing_export.py`, `test_production_hardening.py` |
 | MON-05 | ✅ | drift detection, `test_drift.py` |
-| MON-06 | ✅ | `deploy/monitoring/alert-rules.yaml` |
+| MON-06 | ✅ | `alert-rules.yaml` (latency, error rate, ingestion-failure-rate, DLQ/queue backlog, drift) |
 | MON-07 | ✅ | `/feedback`, `test_feedback.py` |
 | MON-08 | ✅ | `/cost/report`, `test_cost.py` |
 | MON-09 | ⬜ | external LLM-observability tool integration |
@@ -91,16 +91,24 @@ Legend: ✅ done+tested · 🟡 partial · ⬜ not started (infra/frontend)
 ## Security & Governance
 | ID | Status | Evidence |
 |----|--------|----------|
-| SEC-01 | ✅ | API-key auth + DB identity `AUTH_MODE=dev` (X-User-Email), 401 anon, `test_identity_rbac.py`; OIDC reserved |
+| SEC-01 | ✅ | API-key + DB identity (`dev`) + **OIDC/SSO** bearer JWT (`AUTH_MODE=oidc`, JWKS/RS256 + HS256 dev verifier, auto-provision); `test_production_hardening.py` |
 | SEC-02 | ✅ | RBAC via `users`/`memberships` (admin/editor/viewer) enforced in service logic on collection/upload/delete/admin; `test_identity_rbac.py`, `test_rbac.py` |
-| SEC-03 | 🟡 | TLS ingress + NetworkPolicy templates (`ingress.yaml`, `networkpolicy.yaml`); at-rest encryption + live TLS unverified |
+| SEC-03 | 🟡 | TLS ingress + NetworkPolicy + **pod/container securityContext** (non-root, RO-rootfs, drop caps) + ExternalSecrets template + DB-TLS values note; at-rest encryption is storage-class level (unverified live) |
 | SEC-04 | ✅ | tenant isolation (RET-05/CACHE-07 tests) |
 | SEC-05 | ✅ | persistent immutable `audit_log` table + `/admin/audit` + **Audit log UI**; append-only; `test_identity_rbac.py`, `test_audit.py` |
 | SEC-06 | ✅ | erasure, `test_erasure.py` |
 
-## Remaining gaps
-MON-09 external LLM-observability tool, INFRA-09 GPU pools, cron-scheduled
-ingestion (ING-03 polling), real cloud connectors (S3/SharePoint/Confluence —
-`s3_mock` proves the shape), automated backup/DR jobs, SEC-03 at-rest
-encryption, collection/document-level RBAC, OIDC/SSO, and live-cluster deploy
-proof (Helm not yet applied to a real cluster).
+## Remaining gaps (infra / environment level only)
+- **Live-cluster deploy proof** — Helm chart complete (API + worker + scheduler +
+  frontend + ingress/TLS + NetworkPolicy + securityContext + ExternalSecrets +
+  migrate hook + HPA) but not applied to a real cluster here (`helm`/cluster
+  unavailable). See `docs/K8S_DEPLOY.md`.
+- **SEC-03 at-rest encryption** — enforced at the storage-class / managed-DB
+  level (encrypted PVs, `sslmode=require`); config + docs in place, not verified live.
+- **INFRA-09** GPU node pools; **MON-09** external LLM-observability tool (Langfuse/Opik).
+- **Real cloud connectors** ship as isolated adapters (`s3` boto3, `confluence`
+  httpx) — need live creds to exercise; `s3_mock`/`filesystem` fully tested.
+- **Collection/document-level RBAC** (tenant-level roles implemented) and
+  **automated backup/DR jobs** (runbook exists).
+- **NFR/SLO** — `scripts/loadtest.py` + `docs/SLO.md`; p95<2s retrieval needs a
+  co-located/self-hosted embedding endpoint (external-provider RTT dominates locally).

@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     # --- structured logging (MON-04) ---
     LOG_FORMAT: str = "text"  # "text" | "json"
 
+    # --- external LLM observability (MON-09) ---
+    LLM_OBS_ENABLED: bool = False
+    LLM_OBS_ENDPOINT: str = ""   # Langfuse/Opik/Arize ingestion webhook
+    LLM_OBS_API_KEY: str = ""
+
     # --- drift monitoring (MON-05) ---
     DRIFT_THRESHOLD: float = 0.3
 

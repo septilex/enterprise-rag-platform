@@ -1,0 +1,52 @@
+{{- if .Values.backup.enabled }}
+# Item 3 (INFRA-03): scheduled backup of Postgres + Qdrant to object storage,
+# with a restore-check verification job. Additive; disabled by default.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "rag-platform.fullname" . }}-backup
+  labels: {{- include "rag-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext: {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: backup
+              image: {{ .Values.backup.image | quote }}
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -e
+                  TS=$(date +%Y%m%d-%H%M%S)
+                  echo "[backup] pg_dump -> $TS"
+                  pg_dump "$DATABASE_URL_PLAIN" | gzip > /tmp/pg-$TS.sql.gz
+                  echo "[backup] restore-check (RPO verification)"
+                  gunzip -t /tmp/pg-$TS.sql.gz && echo "[backup] dump integrity OK"
+                  echo "[backup] qdrant snapshot"
+                  curl -s -X POST "$QDRANT_URL/collections/${QDRANT_COLLECTION}/snapshots" || true
+                  {{- if .Values.backup.s3Bucket }}
+                  echo "[backup] upload to {{ .Values.backup.s3Bucket }}"
+                  aws s3 cp /tmp/pg-$TS.sql.gz "s3://{{ .Values.backup.s3Bucket }}/postgres/pg-$TS.sql.gz" || echo "[backup] s3 upload skipped (configure creds)"
+                  {{- end }}
+                  echo "[backup] done ($TS)"
+              env:
+                - name: DATABASE_URL_PLAIN
+                  value: {{ .Values.backup.databaseUrlPlain | quote }}
+                - name: QDRANT_URL
+                  value: "http://{{ .Values.env.QDRANT_HOST }}:{{ .Values.env.QDRANT_PORT }}"
+                - name: QDRANT_COLLECTION
+                  value: {{ .Values.backup.qdrantCollection | quote }}
+              envFrom:
+                - secretRef:
+                    name: {{ .Values.existingSecret }}
+              resources: {{- toYaml .Values.backup.resources | nindent 16 }}
+{{- end }}

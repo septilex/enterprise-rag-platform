@@ -19,10 +19,17 @@ spec:
         {{- include "rag-platform.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: worker
     spec:
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.worker.gpu.enabled }}
+      # INFRA-09: schedule embedding/reranking workers onto GPU-tainted nodes.
+      nodeSelector: {{- toYaml .Values.worker.gpu.nodeSelector | nindent 8 }}
+      tolerations: {{- toYaml .Values.worker.gpu.tolerations | nindent 8 }}
+      {{- end }}
       containers:
         - name: worker
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           command: ["python", "-m", "app.worker"]
           envFrom:
             - secretRef:
@@ -32,5 +39,16 @@ spec:
             - name: {{ $k }}
               value: {{ $v | quote }}
             {{- end }}
-          resources: {{- toYaml .Values.worker.resources | nindent 12 }}
+          resources:
+            {{- if .Values.worker.gpu.enabled }}
+            # GPU present -> request a GPU; absent (gpu.enabled=false) -> CPU only.
+            requests: {{- toYaml .Values.worker.resources.requests | nindent 14 }}
+            limits:
+              {{- range $k, $v := .Values.worker.resources.limits }}
+              {{ $k }}: {{ $v }}
+              {{- end }}
+              nvidia.com/gpu: {{ .Values.worker.gpu.count | quote }}
+            {{- else }}
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+            {{- end }}
 {{- end }}

@@ -69,12 +69,140 @@ class DocumentSummary(BaseModel):
     status: str
     doc_metadata: dict
     created_at: datetime
+    chunk_count: int = 0
+    source_id: uuid.UUID | None = None
 
 
 class DriftCheckRequest(BaseModel):
     reference_queries: list[str] = Field(..., min_length=1)
     current_queries: list[str] = Field(..., min_length=1)
     threshold: float | None = Field(default=None, ge=0.0, le=2.0)
+
+
+class TenantRole(BaseModel):
+    tenant_id: uuid.UUID
+    role: str
+
+
+class MeResponse(BaseModel):
+    authenticated: bool
+    superuser: bool
+    user_id: uuid.UUID | None = None
+    email: str | None = None
+    tenants: list[TenantRole] = Field(default_factory=list)
+
+
+class BootstrapRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=320)
+    tenant_name: str = Field(..., min_length=1, max_length=255)
+
+
+class MembershipCreate(BaseModel):
+    tenant_id: uuid.UUID
+    email: str = Field(..., min_length=3, max_length=320)
+    role: str = Field(..., pattern="^(admin|editor|viewer)$")
+
+
+class MemberResponse(BaseModel):
+    user_id: uuid.UUID
+    email: str
+    display_name: str
+    role: str
+
+
+class AuditEntry(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    tenant_id: uuid.UUID | None
+    actor: str
+    action: str
+    target: dict
+    created_at: datetime
+
+
+class SourceUpdate(BaseModel):
+    enabled: bool
+
+
+class SourceCreate(BaseModel):
+    tenant_id: uuid.UUID
+    collection_id: uuid.UUID
+    source_type: str = Field(..., min_length=1, max_length=32)  # connector key
+    display_name: str = Field(..., min_length=1, max_length=255)
+    config: dict = Field(default_factory=dict)
+
+
+class SyncResponse(BaseModel):
+    run_id: uuid.UUID
+    status: str
+    mode: str  # "queued" | "inline" | "already_active"
+
+
+class WorkerStatus(BaseModel):
+    alive: bool
+    last_heartbeat_seconds_ago: float | None = None
+
+
+class QueueStatus(BaseModel):
+    incremental: int = 0
+    bulk: int = 0
+    dead: int = 0
+
+
+class SourceHealth(BaseModel):
+    id: uuid.UUID
+    display_name: str
+    source_type: str
+    enabled: bool
+    health: str  # healthy | stale | failing | idle
+    last_success_at: datetime | None
+    last_error_at: datetime | None
+
+
+class SystemStatus(BaseModel):
+    api: str = "ok"
+    worker: WorkerStatus
+    queue: QueueStatus
+    ingestion_total: int
+    ingestion_by_status: dict
+    active_runs: int
+    failed_runs: int
+    success_rate: float
+    sources: list[SourceHealth]
+
+
+class SourceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    collection_id: uuid.UUID | None
+    source_type: str
+    display_name: str
+    external_ref: str | None
+    enabled: bool
+    last_success_at: datetime | None
+    last_error_at: datetime | None
+    created_at: datetime
+
+
+class IngestionRunResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    source_id: uuid.UUID
+    collection_id: uuid.UUID | None
+    trigger_type: str
+    status: str
+    documents_seen: int
+    documents_indexed: int
+    documents_quarantined: int
+    documents_deleted: int = 0
+    chunks_created: int
+    chunks_reused: int
+    error_summary: str | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    created_at: datetime
 
 
 class WebhookIngestRequest(BaseModel):

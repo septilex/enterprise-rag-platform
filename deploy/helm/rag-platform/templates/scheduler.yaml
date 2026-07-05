@@ -1,0 +1,39 @@
+{{- if .Values.scheduler.enabled }}
+# Ingestion scheduler (ING-03): periodically enqueues due connector syncs.
+# Single replica — the idempotent active-run guard makes duplicate ticks safe,
+# but one scheduler avoids redundant enqueues.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rag-platform.fullname" . }}-scheduler
+  labels: {{- include "rag-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scheduler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "rag-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: scheduler
+  template:
+    metadata:
+      labels:
+        {{- include "rag-platform.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: scheduler
+    spec:
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: scheduler
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command: ["python", "-m", "app.scheduler"]
+          envFrom:
+            - secretRef:
+                name: {{ .Values.existingSecret }}
+          env:
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          resources: {{- toYaml .Values.scheduler.resources | nindent 12 }}
+{{- end }}

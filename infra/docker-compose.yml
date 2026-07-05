@@ -82,6 +82,32 @@ services:
     ports:
       - "8000:8000"
 
+  rag-worker:
+    build: ../backend
+    container_name: rag_worker
+    profiles: ["app"]
+    depends_on: [postgres, redis, qdrant]
+    env_file: ../backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://rag_admin:rag_dev_password@postgres:5432/rag_platform
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      REDIS_URL: redis://redis:6379/0
+      CACHE_ENABLED: "true"
+    command: python -m app.worker
+
+  rag-scheduler:
+    build: ../backend
+    container_name: rag_scheduler
+    profiles: ["app"]
+    depends_on: [postgres, redis]
+    env_file: ../backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://rag_admin:rag_dev_password@postgres:5432/rag_platform
+      REDIS_URL: redis://redis:6379/0
+      CACHE_ENABLED: "true"
+    command: python -m app.scheduler
+
   rag-frontend:
     build: ../frontend
     container_name: rag_frontend

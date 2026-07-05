@@ -6,17 +6,30 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router as api_router, _vector_store
 from app.core.config import settings
-from app.observability import MetricsMiddleware, metrics_response
+from app.observability import (
+    MetricsMiddleware, CorrelationIdMiddleware, metrics_response, setup_logging,
+)
 from app.tracing import setup_tracing
 
-logging.basicConfig(level=logging.INFO)
+setup_logging()
 setup_tracing()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: ensure Qdrant collection exists."""
+    """Startup: ensure Qdrant collection exists + recover any stuck runs."""
     _vector_store.ensure_collection()
+    try:
+        from app.db.base import SessionLocal
+        from app.services.ingestion_runs import recover_stuck_runs
+
+        db = SessionLocal()
+        n = recover_stuck_runs(db)
+        db.close()
+        if n:
+            logging.getLogger("rag").warning("recovered %s stuck ingestion run(s)", n)
+    except Exception:  # never block startup on recovery
+        pass
     yield
 
 
@@ -33,6 +46,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(MetricsMiddleware)
+# Added last => runs first: assigns the request id before anything else.
+app.add_middleware(CorrelationIdMiddleware)
 
 
 @app.get("/health")

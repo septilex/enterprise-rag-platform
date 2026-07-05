@@ -1,0 +1,36 @@
+{{- if .Values.worker.enabled }}
+# Background ingestion worker(s): drain the Redis job queue and execute
+# ingestion runs off the API request path (ING-09). Scale via replicaCount.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rag-platform.fullname" . }}-worker
+  labels: {{- include "rag-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "rag-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "rag-platform.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "app.worker"]
+          envFrom:
+            - secretRef:
+                name: {{ .Values.existingSecret }}
+          env:
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          resources: {{- toYaml .Values.worker.resources | nindent 12 }}
+{{- end }}

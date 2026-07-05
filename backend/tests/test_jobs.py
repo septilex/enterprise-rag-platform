@@ -48,4 +48,4 @@ def test_depth_reports_both_lanes():
     q = RedisJobQueue(fakeredis.FakeStrictRedis(decode_responses=True))
     q.enqueue({"id": 1}, bulk=True)
     q.enqueue({"id": 2}, bulk=False)
-    assert q.depth() == {"incremental": 1, "bulk": 1}
+    assert q.depth() == {"incremental": 1, "bulk": 1, "dead": 0}

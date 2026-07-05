@@ -9,11 +9,14 @@ processes can consume concurrently.
 from __future__ import annotations
 
 import json
+import time
 
 from prometheus_client import Gauge
 
 INCREMENTAL = "jobs:incremental"
 BULK = "jobs:bulk"
+DEAD = "jobs:dead"                # dead-letter queue for exhausted jobs
+HEARTBEAT_KEY = "worker:heartbeat"
 
 QUEUE_DEPTH = Gauge(
     "rag_ingestion_queue_depth", "Pending ingestion jobs", labelnames=("queue",)
@@ -36,16 +39,35 @@ class RedisJobQueue:
         self._refresh_depth()
         return json.loads(raw) if raw is not None else None
 
+    def dead_letter(self, payload: dict) -> None:
+        """Park a permanently-failed job for operator visibility (DLQ)."""
+        self._r.lpush(DEAD, json.dumps({**payload, "dead_at": time.time()}))
+        self._refresh_depth()
+
+    def dead_letters(self, limit: int = 50) -> list[dict]:
+        return [json.loads(x) for x in self._r.lrange(DEAD, 0, limit - 1)]
+
     def depth(self) -> dict:
         return {
             "incremental": self._r.llen(INCREMENTAL),
             "bulk": self._r.llen(BULK),
+            "dead": self._r.llen(DEAD),
         }
+
+    # --- worker liveness ---
+    def heartbeat(self, ttl: int = 30) -> None:
+        """Workers call this each loop so ops can see they're alive."""
+        self._r.set(HEARTBEAT_KEY, str(time.time()), ex=ttl)
+
+    def last_heartbeat(self) -> float | None:
+        raw = self._r.get(HEARTBEAT_KEY)
+        return float(raw) if raw is not None else None
 
     def _refresh_depth(self) -> None:
         d = self.depth()
         QUEUE_DEPTH.labels("incremental").set(d["incremental"])
         QUEUE_DEPTH.labels("bulk").set(d["bulk"])
+        QUEUE_DEPTH.labels("dead").set(d["dead"])
 
 
 def process_next(db, queue: RedisJobQueue, embedder, vector_store, cache=None) -> bool:

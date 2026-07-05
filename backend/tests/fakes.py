@@ -6,6 +6,7 @@ without OpenAI, Qdrant, or a live Redis — every slice stays verifiable in CI.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 import uuid
@@ -35,7 +36,10 @@ class FakeEmbedder(Embedder):
     def _vec(self, text: str) -> list[float]:
         v = [0.0] * self.dim
         for tok in _tokens(text):
-            v[hash(tok) % self.dim] += 1.0
+            # Deterministic across processes (Python's hash() is seed-randomized,
+            # which made bag-of-words bucket collisions flaky between runs).
+            bucket = int(hashlib.md5(tok.encode()).hexdigest(), 16) % self.dim
+            v[bucket] += 1.0
         norm = math.sqrt(sum(x * x for x in v)) or 1.0
         return [x / norm for x in v]
 

@@ -135,6 +135,36 @@ def _invalidate_retrieval_cache(cache, tenant_id, collection_id) -> None:
         cache.delete_prefix(cache.semantic_prefix(tenant_id, collection_id))
 
 
+def delete_document_by_source_uri(
+    db: Session,
+    tenant_id: uuid.UUID,
+    collection_id: uuid.UUID,
+    source_uri: str,
+    vector_store: VectorStore,
+    cache=None,
+) -> bool:
+    """Remove a document (chunks + vectors) identified by its source uri.
+
+    Used to propagate deletions detected by a connector delta (ING-08).
+    """
+    document = (
+        db.query(Document)
+        .filter(
+            Document.tenant_id == tenant_id,
+            Document.collection_id == collection_id,
+            Document.source_uri == source_uri,
+        )
+        .one_or_none()
+    )
+    if document is None:
+        return False
+    _purge_document_chunks(db, document, vector_store)
+    db.delete(document)
+    db.commit()
+    _invalidate_retrieval_cache(cache, tenant_id, collection_id)
+    return True
+
+
 def delete_document(
     db: Session,
     tenant_id: uuid.UUID,
@@ -232,6 +262,9 @@ def ingest_text_document(
     source_uri: str | None = None,
     cache=None,
     metadata: dict | None = None,
+    source_id: uuid.UUID | None = None,
+    ingestion_run_id: uuid.UUID | None = None,
+    created_by: uuid.UUID | None = None,
 ) -> tuple[Document, int, bool]:
     """Ingest text idempotently.
 
@@ -254,6 +287,15 @@ def ingest_text_document(
     doc_meta = {"title": title, **metadata}
     content_hash = _sha256(content)
     resolved_uri = _resolve_source_uri(source_uri, title)
+
+    def _set_provenance(doc: Document) -> None:
+        # Traceability: this doc came from source X, indexed by run Y, by user Z.
+        if source_id is not None:
+            doc.source_id = source_id
+        if ingestion_run_id is not None:
+            doc.ingestion_run_id = ingestion_run_id
+        if created_by is not None and doc.created_by is None:
+            doc.created_by = created_by
 
     existing = (
         db.query(Document)
@@ -281,6 +323,7 @@ def ingest_text_document(
         document.content_hash = content_hash
         document.status = "quarantined"
         document.doc_metadata = {**doc_meta, "failure_reason": failure_reason}
+        _set_provenance(document)
         db.commit()
         db.refresh(document)
         _invalidate_retrieval_cache(cache, tenant_id, collection_id)
@@ -288,6 +331,9 @@ def ingest_text_document(
 
     # --- 1a. Idempotent no-op: same source, unchanged content ---
     if existing is not None and existing.content_hash == content_hash:
+        # Record that this run touched the doc, even though nothing re-indexed.
+        _set_provenance(existing)
+        db.commit()
         chunk_count = (
             db.query(Chunk).filter(Chunk.document_id == existing.id).count()
         )
@@ -300,6 +346,7 @@ def ingest_text_document(
         document.content_hash = content_hash
         document.status = "pending"
         document.doc_metadata = doc_meta
+        _set_provenance(document)
         db.flush()
     else:
         # --- 1c. New source: create document row (pending) ---
@@ -312,6 +359,7 @@ def ingest_text_document(
             status="pending",
             doc_metadata=doc_meta,
         )
+        _set_provenance(document)
         db.add(document)
         db.flush()
 

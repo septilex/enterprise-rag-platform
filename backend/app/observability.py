@@ -47,6 +47,26 @@ CACHE_CALLS_SAVED = Counter(
 DRIFT_SCORE = Gauge("rag_query_drift_score", "Latest query-distribution drift score")
 DRIFT_ALERTS = Counter("rag_query_drift_alerts_total", "Drift alerts raised")
 
+# RAG-specific platform metrics (MON-02/03).
+INGESTION_RUNS = Counter(
+    "rag_ingestion_runs_total", "Ingestion runs by terminal status",
+    labelnames=("status", "trigger"),
+)
+QUERIES = Counter(
+    "rag_queries_total", "Chat/search queries per tenant", labelnames=("tenant", "kind"),
+)
+RETRIEVAL_LATENCY = Histogram(
+    "rag_retrieval_latency_seconds", "Retrieval (embed+search+rerank) latency",
+)
+
+
+def record_ingestion_run(status: str, trigger: str) -> None:
+    INGESTION_RUNS.labels(status, trigger).inc()
+
+
+def record_query(tenant_id, kind: str) -> None:
+    QUERIES.labels(str(tenant_id), kind).inc()
+
 
 def record_cache(layer: str, hit: bool, saved: int = 0) -> None:
     if hit:
@@ -58,6 +78,39 @@ def record_cache(layer: str, hit: bool, saved: int = 0) -> None:
 
 _query_logger = logging.getLogger("rag.query")
 _audit_logger = logging.getLogger("rag.audit")
+
+
+class _JsonLogFormatter(logging.Formatter):
+    """Consistent structured JSON log lines for production log pipelines (MON-04)."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        rid = _request_id.get()
+        if rid:
+            payload["request_id"] = rid
+        if record.exc_info:
+            payload["exc"] = self.formatException(record.exc_info)
+        return json.dumps(payload)
+
+
+def setup_logging() -> None:
+    """Configure root logging; JSON when settings.LOG_FORMAT == 'json'."""
+    root = logging.getLogger()
+    level = logging.INFO
+    root.setLevel(level)
+    for h in list(root.handlers):
+        root.removeHandler(h)
+    handler = logging.StreamHandler()
+    if settings.LOG_FORMAT == "json":
+        handler.setFormatter(_JsonLogFormatter())
+    else:
+        handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+    root.addHandler(handler)
 
 # PII patterns redacted from logged query text (MON-04).
 _PII_PATTERNS = [
@@ -83,6 +136,30 @@ def audit_log(action: str, actor: str, target: dict) -> None:
         "actor": actor,
         "target": target,
     }))
+
+
+import contextvars
+
+# Correlation id propagated across a request: chat -> retrieval -> ingestion refs.
+_request_id: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="")
+
+
+def current_request_id() -> str:
+    return _request_id.get()
+
+
+class CorrelationIdMiddleware(BaseHTTPMiddleware):
+    """Assign/propagate an X-Request-ID for every request (MON-01 correlation)."""
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        rid = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+        token = _request_id.set(rid)
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = rid
+            return response
+        finally:
+            _request_id.reset(token)
 
 
 class MetricsMiddleware(BaseHTTPMiddleware):
@@ -126,6 +203,7 @@ def log_query(
     logged_query = redact_pii(query) if settings.LOG_PII_REDACTION else query
     record = {
         "event": "rag_query",
+        "request_id": current_request_id() or str(uuid.uuid4()),
         "trace_id": str(uuid.uuid4()),
         "tenant_id": str(tenant_id),
         "collection_id": str(collection_id),

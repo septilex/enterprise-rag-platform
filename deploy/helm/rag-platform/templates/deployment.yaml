@@ -18,10 +18,12 @@ spec:
         prometheus.io/path: "/metrics"
         prometheus.io/port: "{{ .Values.service.port }}"
     spec:
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: api
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           ports:
             - containerPort: {{ .Values.service.port }}
           envFrom:

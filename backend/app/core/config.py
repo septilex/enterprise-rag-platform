@@ -29,6 +29,8 @@ class Settings(BaseSettings):
 
     # --- reranking slice (RET-03) ---
     RERANK_ENABLED: bool = False
+    # "none" | "heuristic" (no torch) | "cross_encoder" (needs sentence-transformers)
+    RERANK_STRATEGY: str = "heuristic"
     RERANK_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     RERANK_CANDIDATE_POOL: int = 20
 
@@ -64,6 +66,12 @@ class Settings(BaseSettings):
     # --- query-log PII redaction (MON-04) ---
     LOG_PII_REDACTION: bool = True
 
+    # --- scheduled ingestion (ING-03) ---
+    SCHEDULER_INTERVAL: int = 60  # seconds between scheduler ticks
+
+    # --- structured logging (MON-04) ---
+    LOG_FORMAT: str = "text"  # "text" | "json"
+
     # --- drift monitoring (MON-05) ---
     DRIFT_THRESHOLD: float = 0.3
 
@@ -91,6 +99,19 @@ class Settings(BaseSettings):
             "http://localhost:5175", "http://localhost:8080",
             "http://127.0.0.1:5173", "http://127.0.0.1:5175",
         ]
+
+    # --- identity / auth mode (SEC-01/02) ---
+    # "open" (dev/tests, superuser), "dev" (DB users via X-User-Email header),
+    # "oidc" (SSO via bearer JWT).
+    AUTH_MODE: str = "open"
+
+    # --- OIDC / SSO (SEC-01) ---
+    OIDC_ISSUER: str = ""
+    OIDC_AUDIENCE: str = ""
+    OIDC_JWKS_URL: str = ""            # production: verify RS256 against provider JWKS
+    OIDC_DEV_SECRET: str = ""         # local/staging: HS256 shared secret
+    # Auto-provision a User row on first successful SSO login (no membership).
+    OIDC_AUTO_PROVISION: bool = True
 
     # --- RBAC slice (SEC-02) ---
     # JSON mapping api_key -> {"tenant_id": "<uuid>", "collections": ["<uuid>"]|"*"}.

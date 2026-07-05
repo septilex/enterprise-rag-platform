@@ -34,6 +34,32 @@ def test_stream_emits_citations_tokens_then_done(api_client, tenant):
     assert len(events[0]["citations"]) >= 1
 
 
+def test_stream_persists_turn_to_session(api_client, tenant):
+    tid, cid = _setup(api_client, tenant)
+    sid = api_client.post("/sessions", json={
+        "tenant_id": tid, "user_id": "u", "collection_id": cid, "title": "t"}).json()["id"]
+
+    r = api_client.post("/chat/stream", json={
+        "tenant_id": tid, "collection_id": cid,
+        "query": "vacation days", "session_id": sid})
+    assert r.status_code == 200
+
+    # History must reload after streaming (UI-03 regression).
+    msgs = api_client.get(f"/sessions/{sid}/messages", params={"tenant_id": tid}).json()
+    assert [m["role"] for m in msgs] == ["user", "assistant"]
+    assert msgs[0]["content"] == "vacation days"
+    assert msgs[1]["content"]
+
+
+def test_stream_unknown_session_404(api_client, tenant):
+    import uuid
+    tid, cid = _setup(api_client, tenant)
+    r = api_client.post("/chat/stream", json={
+        "tenant_id": tid, "collection_id": cid,
+        "query": "hi", "session_id": str(uuid.uuid4())})
+    assert r.status_code == 404
+
+
 def test_stream_no_context_returns_done_not_grounded(api_client, tenant):
     tid, cid = _setup(api_client, tenant)
     r = api_client.post("/chat/stream", json={

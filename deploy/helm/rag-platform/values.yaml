@@ -34,6 +34,19 @@ strategy:
     maxSurge: 1
     maxUnavailable: 0
 
+# Production pod/container hardening (SEC-03: least privilege).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
 # Non-secret config -> env. Secrets come from an existing Secret (INFRA-06).
 env:
   DATABASE_URL: "postgresql+psycopg2://rag_admin:rag_dev_password@postgres:5432/rag_platform"
@@ -42,7 +55,16 @@ env:
   REDIS_URL: "redis://redis:6379/0"
   CACHE_ENABLED: "true"
   HYBRID_ENABLED: "true"
-  RERANK_ENABLED: "false"
+  RERANK_ENABLED: "true"
+  RERANK_STRATEGY: "heuristic"
+  LOG_FORMAT: "json"
+  # Observability export (point at your collector). Empty = no export.
+  OTEL_EXPORTER_OTLP_ENDPOINT: ""
+  # SSO: set AUTH_MODE=oidc and the OIDC_* values (JWKS/issuer/audience) in prod.
+  AUTH_MODE: "open"
+  # SEC-03: require TLS to Postgres in production, e.g. append ?sslmode=require
+  # to DATABASE_URL and mount the CA. Vector store + object storage use
+  # encrypted PVs / SSE via the storage class.
 
 # Name of a pre-created Secret holding OPENAI_API_KEY, API_KEYS, PRINCIPALS_JSON.
 existingSecret: rag-platform-secrets
@@ -57,6 +79,28 @@ secrets:
 # Alembic migration hook Job (INFRA-07).
 migrations:
   enabled: true
+
+# Background ingestion worker(s) (ING-09). Drains the Redis queue.
+worker:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+# Ingestion scheduler (ING-03). Enqueues due connector syncs.
+scheduler:
+  enabled: true
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 200m, memory: 256Mi }
+
+# Optional: create the app Secret from an external store via External Secrets
+# Operator (SEC-03/INFRA-06) instead of a static K8s Secret.
+externalSecret:
+  enabled: false
+  secretStore: aws-secretsmanager   # ClusterSecretStore name
+  remoteKey: rag-platform/prod
 
 probes:
   liveness:

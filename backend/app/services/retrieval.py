@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.models import Chunk
 from app.services.embedder import Embedder
-from app.services.reranker import CrossEncoderReranker
-from app.observability import record_cache
+from app.services.reranker import CrossEncoderReranker, get_reranker
+import time as _time
+
+from app.observability import record_cache, RETRIEVAL_LATENCY
 from app.services.sparse import bm25_search
 from app.services.vector_store import VectorStore
 from app.tracing import span
@@ -83,6 +85,8 @@ def search_chunks(
             return _deserialize(hit)
         record_cache("retrieval", hit=False)
 
+    _t0 = _time.perf_counter()
+
     # 1. Embed the query (single text → single vector)
     query_vector = embedder.embed([query])[0]
 
@@ -119,6 +123,7 @@ def search_chunks(
         ordered_ids = dense_ids
 
     if not ordered_ids:
+        RETRIEVAL_LATENCY.observe(_time.perf_counter() - _t0)
         return []
 
     # 4. Hydrate chunk rows from Postgres, preserving fused order
@@ -153,15 +158,17 @@ def search_chunks(
             }
         )
 
-    # 5. Rerank
-    if settings.RERANK_ENABLED:
+    # 5. Rerank (modular stage: strategy selected by config, RET-03)
+    reranker = get_reranker() if settings.RERANK_ENABLED else None
+    if reranker is not None:
         with span("retrieval.rerank"):
-            final = _reranker.rerank(query, results, top_k)
+            final = reranker.rerank(query, results, top_k)
     else:
         final = results[:top_k]
 
     if cache_key is not None:
         cache.set_json(cache_key, _serialize(final), settings.RETRIEVAL_CACHE_TTL)
+    RETRIEVAL_LATENCY.observe(_time.perf_counter() - _t0)
     return final
 
 

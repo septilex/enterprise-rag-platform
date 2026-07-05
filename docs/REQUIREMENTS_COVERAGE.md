@@ -1,6 +1,6 @@
 # Requirements Coverage — RAG Platform v1.0
 
-Status of every PDF requirement against the backend. **78 tests green.**
+Status of every PDF requirement against the backend. **129 tests green.**
 Feature flags default OFF to preserve baseline behavior; production values files
 turn them on. Flags: `HYBRID_ENABLED`, `RERANK_ENABLED`, `CACHE_ENABLED`,
 `SEMANTIC_CACHE_ENABLED`, `QUERY_TRANSFORM`, `MULTI_HOP_ENABLED`, `API_KEYS`,
@@ -25,15 +25,15 @@ Legend: ✅ done+tested · 🟡 partial · ⬜ not started (infra/frontend)
 ## Dynamic Data Ingestion
 | ID | Status | Evidence |
 |----|--------|----------|
-| ING-01 | ✅ | `services/connectors.py` registry + text/filesystem, `test_connectors.py` |
+| ING-01 | ✅ | `Source` model + `services/ingestion_runs.py` orchestrator (manual_upload/api_text/webhook/connector = source types) + `services/connectors.py` registry; `/sources`; `test_ingestion_platform.py` |
 | ING-02 | ✅ | delta re-index in `ingest_text_document`, `test_ingestion.py` |
-| ING-03 | ✅ | `POST /ingest/webhook`, `test_webhook_ingest.py` |
+| ING-03 | ✅ | `POST /ingest/webhook` + connector `POST /sources/{id}/sync` (queued to worker); cron pending; `test_connector_platform.py` |
 | ING-04 | ✅ | content-hash idempotency, `test_ingestion.py` |
 | ING-05 | ✅ | per-collection chunking, `test_chunking.py` |
 | ING-06 | ✅ | metadata tagging + payload, `test_metadata_filter.py` |
-| ING-07 | ✅ | quarantine + `GET /documents?status=quarantined`, `test_quarantine.py` |
-| ING-08 | ✅ | delete propagation, `test_ingestion.py` |
-| ING-09 | ✅ | Redis priority queues + `/ingest/batch`, `test_jobs.py` |
+| ING-07 | ✅ | quarantine + `IngestionRun` status=failed/partial + `GET /ingestion/runs` + `GET /documents?status=quarantined`, `test_ingestion_platform.py` |
+| ING-08 | ✅ | delete propagation + **connector deletion delta** (`documents_deleted`), `test_ops_reliability.py` |
+| ING-09 | ✅ | Redis queue + **background worker** (`app/worker.py`, Helm `worker.yaml`) draining sync jobs, queued→running→done + retry; `test_connector_platform.py` |
 | ING-10 | ✅ | `services/reindex.py`, `test_reindex.py` |
 
 ## Retrieval
@@ -41,7 +41,7 @@ Legend: ✅ done+tested · 🟡 partial · ⬜ not started (infra/frontend)
 |----|--------|----------|
 | RET-01 | ✅ | hybrid dense+BM25+RRF, `test_hybrid.py` |
 | RET-02 | ✅ | `VectorStore` ABC (Qdrant + in-memory) |
-| RET-03 | ✅ | `CrossEncoderReranker` + `/search/debug` |
+| RET-03 | ✅ | modular rerank stage: `HeuristicReranker` (no-torch, default) + `CrossEncoderReranker`, strategy-selectable; `/search/debug`; `test_reranker.py` |
 | RET-04 | ✅ | metadata/ACL filter, `test_metadata_filter.py` |
 | RET-05 | ✅ | tenant+collection scoping |
 | RET-06 | ✅ | dedup + token budget + cap, `test_generation.py` |
@@ -66,7 +66,7 @@ Legend: ✅ done+tested · 🟡 partial · ⬜ not started (infra/frontend)
 | ID | Status | Evidence |
 |----|--------|----------|
 | MON-01 | ✅ | OTel spans + OTLP/console exporter wiring (`tracing.py`); live Jaeger view needs a collector |
-| MON-02 | ✅ | `/metrics`, `test_observability.py` |
+| MON-02 | ✅ | `/metrics` + `/admin/system/status` (worker heartbeat, queue/DLQ depth, ingestion success rate, source health) + **Operations dashboard UI**; `test_platform_metrics.py`, `test_ops_reliability.py` |
 | MON-03 | ✅ | `/eval/scorecard`, `test_evaluation.py` |
 | MON-04 | ✅ | structured query log + PII redaction (`redact_pii`), `test_pii_and_tracing_export.py` |
 | MON-05 | ✅ | drift detection, `test_drift.py` |
@@ -91,13 +91,16 @@ Legend: ✅ done+tested · 🟡 partial · ⬜ not started (infra/frontend)
 ## Security & Governance
 | ID | Status | Evidence |
 |----|--------|----------|
-| SEC-01 | ✅ | API-key auth, `test_auth.py` |
-| SEC-02 | ✅ | RBAC principals, `test_rbac.py` |
+| SEC-01 | ✅ | API-key auth + DB identity `AUTH_MODE=dev` (X-User-Email), 401 anon, `test_identity_rbac.py`; OIDC reserved |
+| SEC-02 | ✅ | RBAC via `users`/`memberships` (admin/editor/viewer) enforced in service logic on collection/upload/delete/admin; `test_identity_rbac.py`, `test_rbac.py` |
 | SEC-03 | 🟡 | TLS ingress + NetworkPolicy templates (`ingress.yaml`, `networkpolicy.yaml`); at-rest encryption + live TLS unverified |
 | SEC-04 | ✅ | tenant isolation (RET-05/CACHE-07 tests) |
-| SEC-05 | ✅ | audit log, `test_audit.py` |
+| SEC-05 | ✅ | persistent immutable `audit_log` table + `/admin/audit` + **Audit log UI**; append-only; `test_identity_rbac.py`, `test_audit.py` |
 | SEC-06 | ✅ | erasure, `test_erasure.py` |
 
-## Not started (out of backend scope)
-Web chat frontend (UI-07/08), MON-09 external tool, INFRA-09 GPU pools,
-ING-09 distributed worker queue, automated backup/DR jobs.
+## Remaining gaps
+MON-09 external LLM-observability tool, INFRA-09 GPU pools, cron-scheduled
+ingestion (ING-03 polling), real cloud connectors (S3/SharePoint/Confluence —
+`s3_mock` proves the shape), automated backup/DR jobs, SEC-03 at-rest
+encryption, collection/document-level RBAC, OIDC/SSO, and live-cluster deploy
+proof (Helm not yet applied to a real cluster).

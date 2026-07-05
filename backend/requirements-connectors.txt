@@ -1,0 +1,5 @@
+# Optional cloud-connector SDKs. Install into images that need real S3 access:
+#   pip install -r requirements.txt -r requirements-connectors.txt
+# Confluence uses httpx (already in requirements.txt) — no extra dep needed.
+-r requirements.txt
+boto3>=1.34,<2.0

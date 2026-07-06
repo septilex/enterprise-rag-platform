@@ -1,0 +1,75 @@
+# Prometheus Operator PrometheusRule — same SLO alerts as alert-rules.yaml, in
+# CRD form so kube-prometheus-stack loads them automatically (MON-06).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: rag-platform-slo
+  namespace: rag
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: rag-platform-slo
+      rules:
+        - alert: HighP95Latency
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(rag_request_latency_seconds_bucket[5m])) by (le, path)
+            ) > 2
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "p95 latency > 2s on {{ $labels.path }}"
+        - alert: HighErrorRate
+          expr: |
+            sum(rate(rag_requests_total{status=~"5.."}[5m]))
+            / sum(rate(rag_requests_total[5m])) > 0.05
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "5xx error rate > 5%"
+        - alert: CacheHitRatioCollapse
+          expr: |
+            sum(rate(rag_cache_hits_total[15m]))
+            / clamp_min(sum(rate(rag_cache_hits_total[15m])) + sum(rate(rag_cache_misses_total[15m])), 1)
+            < 0.2
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "Cache hit ratio collapsed below 20%"
+        - alert: IngestionFailureRate
+          expr: |
+            sum(rate(rag_ingestion_runs_total{status="failed"}[15m]))
+            / clamp_min(sum(rate(rag_ingestion_runs_total[15m])), 1) > 0.2
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "Ingestion run failure rate > 20%"
+        - alert: DeadLetterBacklog
+          expr: rag_ingestion_queue_depth{queue="dead"} > 0
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "Ingestion jobs in the dead-letter queue"
+        - alert: IngestionQueueBacklog
+          expr: rag_ingestion_queue_depth{queue="incremental"} > 100
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Ingestion queue backlog > 100 (workers behind)"
+        - alert: HighRetrievalLatency
+          expr: |
+            histogram_quantile(0.95, sum(rate(rag_retrieval_latency_seconds_bucket[5m])) by (le)) > 2
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "Retrieval p95 latency > 2s (SLO breach)"
+        - alert: QueryDriftDetected
+          expr: increase(rag_query_drift_alerts_total[30m]) > 0
+          for: 1m
+          labels: { severity: warning }
+          annotations:
+            summary: "Query-distribution drift detected"
+        # Worker liveness is surfaced via GET /admin/system/status (Redis
+        # heartbeat) and the Ops dashboard — workers run no HTTP /metrics server,
+        # so there is no Prometheus-native worker-down series to alert on.

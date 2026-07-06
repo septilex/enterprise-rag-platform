@@ -1,0 +1,103 @@
+{
+  "title": "RAG Platform — Overview",
+  "uid": "rag-platform",
+  "schemaVersion": 39,
+  "editable": true,
+  "tags": ["rag", "platform"],
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "Prometheus", "value": "Prometheus" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "title": "Request rate (by path)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum(rate(rag_requests_total[5m])) by (path)", "legendFormat": "{{path}}" }
+      ]
+    },
+    {
+      "title": "Error rate (5xx %)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "percentunit",
+        "thresholds": { "steps": [
+          { "color": "green", "value": null }, { "color": "red", "value": 0.05 } ] } } },
+      "targets": [
+        { "expr": "sum(rate(rag_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(rag_requests_total[5m])),1)" }
+      ]
+    },
+    {
+      "title": "Request p95 latency (s)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "s",
+        "thresholds": { "steps": [
+          { "color": "green", "value": null }, { "color": "red", "value": 2 } ] } } },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(rag_request_latency_seconds_bucket[5m])) by (le))" }
+      ]
+    },
+    {
+      "title": "Retrieval latency p50/p95/p99 (s)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(rag_retrieval_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(rag_retrieval_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(rag_retrieval_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "title": "Queries per tenant",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum(rate(rag_queries_total[5m])) by (tenant, kind)", "legendFormat": "{{tenant}} {{kind}}" }
+      ]
+    },
+    {
+      "title": "Ingestion runs by status",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum(rate(rag_ingestion_runs_total[15m])) by (status)", "legendFormat": "{{status}}" }
+      ]
+    },
+    {
+      "title": "Ingestion queue depth",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "rag_ingestion_queue_depth", "legendFormat": "{{queue}}" }
+      ]
+    },
+    {
+      "title": "Cache hit ratio",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "percentunit",
+        "thresholds": { "steps": [
+          { "color": "red", "value": null }, { "color": "green", "value": 0.2 } ] } } },
+      "targets": [
+        { "expr": "sum(rate(rag_cache_hits_total[15m])) / clamp_min(sum(rate(rag_cache_hits_total[15m]))+sum(rate(rag_cache_misses_total[15m])),1)" }
+      ]
+    }
+  ]
+}

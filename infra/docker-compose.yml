@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: rag_admin
-      POSTGRES_PASSWORD: rag_dev_password
+      POSTGRES_PASSWORD: YOUR_DEV_PASSWORD
       POSTGRES_DB: rag_platform
     ports:
       - "5432:5432"
@@ -50,7 +50,7 @@ services:
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: rag_admin
-      MINIO_ROOT_PASSWORD: rag_dev_password
+      MINIO_ROOT_PASSWORD: YOUR_DEV_PASSWORD
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -70,7 +70,7 @@ services:
     depends_on: [postgres, redis, qdrant]
     env_file: ../backend/.env
     environment:
-      DATABASE_URL: postgresql+psycopg2://rag_admin:rag_dev_password@postgres:5432/rag_platform
+      DATABASE_URL: postgresql+psycopg2://rag_admin:YOUR_DEV_PASSWORD@postgres:5432/rag_platform
       QDRANT_HOST: qdrant
       QDRANT_PORT: "6333"
       REDIS_URL: redis://redis:6379/0
@@ -89,7 +89,7 @@ services:
     depends_on: [postgres, redis, qdrant]
     env_file: ../backend/.env
     environment:
-      DATABASE_URL: postgresql+psycopg2://rag_admin:rag_dev_password@postgres:5432/rag_platform
+      DATABASE_URL: postgresql+psycopg2://rag_admin:YOUR_DEV_PASSWORD@postgres:5432/rag_platform
       QDRANT_HOST: qdrant
       QDRANT_PORT: "6333"
       REDIS_URL: redis://redis:6379/0
@@ -103,7 +103,7 @@ services:
     depends_on: [postgres, redis]
     env_file: ../backend/.env
     environment:
-      DATABASE_URL: postgresql+psycopg2://rag_admin:rag_dev_password@postgres:5432/rag_platform
+      DATABASE_URL: postgresql+psycopg2://rag_admin:YOUR_DEV_PASSWORD@postgres:5432/rag_platform
       REDIS_URL: redis://redis:6379/0
       CACHE_ENABLED: "true"
     command: python -m app.scheduler

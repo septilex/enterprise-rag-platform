@@ -49,7 +49,7 @@ containerSecurityContext:
 
 # Non-secret config -> env. Secrets come from an existing Secret (INFRA-06).
 env:
-  DATABASE_URL: "postgresql+psycopg2://rag_admin:rag_dev_password@postgres:5432/rag_platform"
+  DATABASE_URL: "postgresql+psycopg2://<user>:<password>@postgres:5432/rag_platform"
   QDRANT_HOST: "qdrant"
   QDRANT_PORT: "6333"
   REDIS_URL: "redis://redis:6379/0"
@@ -121,7 +121,7 @@ backup:
   enabled: false
   schedule: "0 */6 * * *"          # every 6h; RPO <= 15m needs a shorter cadence
   image: "ghcr.io/rag-platform/backup:0.1.0"   # image with pg_dump + curl + aws
-  databaseUrlPlain: "postgresql://rag_admin:rag_dev_password@postgres:5432/rag_platform"
+  databaseUrlPlain: "postgresql://<user>:<password>@postgres:5432/rag_platform"
   qdrantCollection: "rag_chunks"
   s3Bucket: ""                      # e.g. my-backups (empty = local dump only)
   resources:

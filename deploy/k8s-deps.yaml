@@ -23,7 +23,7 @@ spec:
           image: postgres:16-alpine
           env:
             - { name: POSTGRES_USER, value: rag_admin }
-            - { name: POSTGRES_PASSWORD, value: rag_dev_password }
+            - { name: POSTGRES_PASSWORD, value: YOUR_DEV_PASSWORD }
             - { name: POSTGRES_DB, value: rag_platform }
           ports: [{ containerPort: 5432 }]
           volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]

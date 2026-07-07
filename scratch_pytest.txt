@@ -1,0 +1,29 @@
+ssssssss.ss.sss...s......sss..ssss...sss..sss........sssssssssssssssssss [ 51%]
+s.s.sssss.sss.sss.s..ssssssss.ss...ss..ssssss...ssssssssssssss...ssss    [100%]
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\praji\enterprise-rag-platform\backend\venv\Lib\site-packages\opentelemetry\sdk\_shared_internal\__init__.py", line 182, in _export
+    self._exporter.export(
+  File "C:\Users\praji\enterprise-rag-platform\backend\venv\Lib\site-packages\opentelemetry\sdk\trace\export\__init__.py", line 346, in export
+    self.out.write(self.formatter(span))
+ValueError: I/O operation on closed file.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praji\AppData\Local\Programs\Python\Python311\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+ValueError: I/O operation on closed file.
+Call stack:
+  File "C:\Users\praji\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1002, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Users\praji\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Users\praji\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\praji\enterprise-rag-platform\backend\venv\Lib\site-packages\opentelemetry\sdk\_shared_internal\__init__.py", line 165, in worker
+    self._export(BatchExportStrategy.EXPORT_ALL)
+  File "C:\Users\praji\enterprise-rag-platform\backend\venv\Lib\site-packages\opentelemetry\sdk\_shared_internal\__init__.py", line 191, in _export
+    _logger.exception(
+Message: 'Exception while exporting %s.'
+Arguments: ('Span',)

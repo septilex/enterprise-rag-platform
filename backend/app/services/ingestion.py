@@ -330,7 +330,11 @@ def ingest_text_document(
         return document, 0, False
 
     # --- 1a. Idempotent no-op: same source, unchanged content ---
-    if existing is not None and existing.content_hash == content_hash:
+    # Only when the previous ingest actually finished ("embedded"): a document
+    # left in pending/chunked by an interrupted run has no vectors in the
+    # store, so a retry must fall through and re-index it, not no-op.
+    if (existing is not None and existing.content_hash == content_hash
+            and existing.status == "embedded"):
         # Record that this run touched the doc, even though nothing re-indexed.
         _set_provenance(existing)
         db.commit()

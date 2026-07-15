@@ -17,6 +17,9 @@ python -m venv venv && venv/Scripts/pip install -r requirements-dev.txt   # firs
 venv/Scripts/python -m alembic upgrade head
 CACHE_ENABLED=true HYBRID_ENABLED=true venv/Scripts/python -m uvicorn app.main:app --port 8000
 
+# 2b. Ingestion worker (required for large/background uploads and source syncs)
+CACHE_ENABLED=true venv/Scripts/python -m app.worker
+
 # 3. Frontend (proxies /api -> :8000)
 cd frontend
 npm install            # first time

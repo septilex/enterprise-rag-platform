@@ -33,7 +33,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 ::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 6px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
 
-.app { display: grid; grid-template-columns: 288px 1fr; height: 100vh; }
+.app { display: grid; grid-template-columns: 288px 1fr; height: 100vh; overflow: hidden; }
 
 /* ---------- Sidebar ---------- */
 .sidebar {
@@ -44,6 +44,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   gap: 18px;
   padding: 16px 14px;
   overflow-y: auto;
+  /* grid items default to min-height:auto — without this the column can
+     stretch past the viewport and scroll the whole page with the chat */
+  min-height: 0;
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 6px 8px; }
 .brand-mark {
@@ -132,7 +135,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 
 /* ---------- Chat column ---------- */
-.chat { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
+.chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
 .chat-header {
   display: flex; align-items: center; gap: 16px;
   padding: 16px 24px; border-bottom: 1px solid var(--border);
@@ -341,7 +344,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .user-role.editor { color: var(--ok); }
 
 /* ---------- Workspace (admin) views ---------- */
-.workspace { overflow-y: auto; background: var(--bg); }
+.workspace { overflow-y: auto; min-height: 0; background: var(--bg); }
 .view { max-width: 960px; margin: 0 auto; padding: 28px 32px; }
 .view-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; }
 .view-head h2 { font-size: 20px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }

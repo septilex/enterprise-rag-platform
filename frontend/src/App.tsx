@@ -18,8 +18,13 @@ const USER_ID = import.meta.env.VITE_USER_ID ?? "web-user";
 type UploadState =
   | { kind: "idle" }
   | { kind: "uploading"; name: string }
+  | { kind: "background"; name: string }
   | { kind: "done"; name: string; chunks: number; quarantined: boolean }
   | { kind: "error"; message: string };
+
+const TERMINAL_RUN_STATUSES = new Set(["succeeded", "partial", "failed"]);
+const RUN_POLL_MS = 3000;
+const RUN_POLL_MAX = 300; // ~15 min — plenty for very large files
 
 export function App() {
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -140,11 +145,40 @@ export function App() {
     });
   }, [messages, collectionId]);
 
+  // Background uploads: poll the ingestion run until it reaches a terminal
+  // state, then refresh the workspace and show the outcome banner.
+  const watchRun = useCallback(async (runId: string, name: string, cid: string) => {
+    for (let i = 0; i < RUN_POLL_MAX; i++) {
+      await new Promise((r) => setTimeout(r, RUN_POLL_MS));
+      try {
+        const runs = await api.listIngestionRuns(TENANT_ID, cid, 25);
+        const run = runs.find((r) => r.id === runId);
+        if (run && TERMINAL_RUN_STATUSES.has(run.status)) {
+          loadWorkspace(cid);
+          setUpload({
+            kind: "done", name, chunks: run.chunks_created,
+            quarantined: run.status === "failed" || run.documents_quarantined > 0,
+          });
+          setTimeout(() => setUpload((u) => (u.kind === "done" ? { kind: "idle" } : u)), 8000);
+          return;
+        }
+      } catch { /* transient poll failure — keep trying */ }
+    }
+    setUpload({ kind: "error", message: `${name} is still indexing — check Sources & activity.` });
+  }, [loadWorkspace]);
+
   const uploadFile = useCallback(async (file: File) => {
     if (!collectionId) return;
     setError(null); setUpload({ kind: "uploading", name: file.name });
     try {
       const res = await api.uploadFile({ tenantId: TENANT_ID, collectionId, sessionId, file });
+      if (res.background && res.run_id) {
+        // Large file — indexing continues on the worker; the UI stays usable.
+        setUpload({ kind: "background", name: file.name });
+        loadWorkspace(collectionId);
+        void watchRun(res.run_id, file.name, collectionId);
+        return;
+      }
       setUpload({ kind: "done", name: file.name, chunks: res.chunks_created,
                   quarantined: res.status === "quarantined" });
       loadWorkspace(collectionId);
@@ -152,7 +186,7 @@ export function App() {
     } catch (e) {
       setUpload({ kind: "error", message: String(e) });
     }
-  }, [collectionId, sessionId, loadWorkspace]);
+  }, [collectionId, sessionId, loadWorkspace, watchRun]);
 
   const toggleSource = useCallback(async (s: Source) => {
     await api.setSourceEnabled(TENANT_ID, s.id, !s.enabled);
@@ -299,6 +333,12 @@ function ChatMain({
 function UploadBanner({ upload, onDismiss }: { upload: UploadState; onDismiss: () => void }) {
   if (upload.kind === "uploading")
     return <div className="banner info"><span className="spin" /> Uploading {upload.name}…</div>;
+  if (upload.kind === "background")
+    return (
+      <div className="banner info">
+        <span className="spin" /> Indexing {upload.name} in the background — you can keep chatting.
+      </div>
+    );
   if (upload.kind === "error")
     return <div className="banner bad"><span>Upload failed: {upload.message}</span><button onClick={onDismiss}>Dismiss</button></div>;
   if (upload.kind === "done")

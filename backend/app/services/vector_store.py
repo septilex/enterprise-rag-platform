@@ -52,6 +52,11 @@ class VectorStore(abc.ABC):
 class QdrantVectorStore(VectorStore):
     """Qdrant implementation of VectorStore."""
 
+    # A big document is thousands of points; one monolithic upsert is a
+    # multi-MB HTTP request that times out / gets aborted. Batching keeps each
+    # request small and lets progress survive transient hiccups.
+    UPSERT_BATCH = 256
+
     def __init__(
         self,
         host: str | None = None,
@@ -63,7 +68,9 @@ class QdrantVectorStore(VectorStore):
         self.port = port or settings.QDRANT_PORT
         self.collection_name = collection_name or settings.QDRANT_COLLECTION
         self.vector_size = vector_size or settings.QDRANT_VECTOR_SIZE
-        self._client = QdrantClient(host=self.host, port=self.port)
+        # Default client timeout is a few seconds — too tight for indexing a
+        # batch of points with wait=true on a busy node.
+        self._client = QdrantClient(host=self.host, port=self.port, timeout=60)
 
     def ensure_collection(self) -> None:
         """Create collection if it doesn't already exist."""
@@ -91,10 +98,11 @@ class QdrantVectorStore(VectorStore):
             )
             for point_id, vector, payload in zip(ids, vectors, payloads)
         ]
-        self._client.upsert(
-            collection_name=self.collection_name,
-            points=points,
-        )
+        for start in range(0, len(points), self.UPSERT_BATCH):
+            self._client.upsert(
+                collection_name=self.collection_name,
+                points=points[start:start + self.UPSERT_BATCH],
+            )
 
     def search(
         self,

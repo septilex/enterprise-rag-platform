@@ -139,9 +139,14 @@ export const api = {
   },
 
   // UI-07: upload a file as retrieval context for the current collection.
+  // Large files come back with { background: true, run_id } — the server
+  // spools them to the ingestion worker so the request never blocks (ING-09).
   async uploadFile(input: {
     tenantId: string; collectionId: string; sessionId?: string | null; file: File;
-  }): Promise<{ document_id: string; status: string; chunks_created: number }> {
+  }): Promise<{
+    document_id: string | null; status: string; chunks_created: number;
+    run_id?: string | null; background?: boolean;
+  }> {
     const form = new FormData();
     form.append("tenant_id", input.tenantId);
     form.append("collection_id", input.collectionId);

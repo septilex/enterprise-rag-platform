@@ -20,3 +20,7 @@ frontend/out/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local runtime / scratch
+scratch_*
+backend/var/

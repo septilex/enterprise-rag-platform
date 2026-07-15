@@ -1,6 +1,7 @@
 """Embedder interface and OpenAI implementation."""
 
 import abc
+import time
 
 import openai
 
@@ -18,21 +19,51 @@ class Embedder(abc.ABC):
 class OpenAIEmbedder(Embedder):
     """OpenAI text-embedding-3-small embedder."""
 
+    # OpenAI caps embeddings requests at 2048 inputs / ~300k tokens; batching
+    # keeps arbitrarily large documents (e.g. a 650-page PDF) under both limits.
+    BATCH_SIZE = 128
+    # A large document is many sequential requests — one flaky connection must
+    # not fail the whole job, so each batch retries with backoff on transient
+    # network/throttle errors before giving up.
+    BATCH_ATTEMPTS = 4
+
     def __init__(
         self,
         model: str = "text-embedding-3-small",
         api_key: str | None = None,
     ):
         self.model = model
-        self._client = openai.OpenAI(api_key=api_key or settings.OPENAI_API_KEY)
+        # Fail a hung request in 60s (SDK default is 600s) so batch-level
+        # retries kick in quickly; the SDK's own 2 retries handle blips.
+        self._client = openai.OpenAI(
+            api_key=api_key or settings.OPENAI_API_KEY,
+            timeout=60.0, max_retries=2,
+        )
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        response = self._client.embeddings.create(input=texts, model=self.model)
-        # sort by index to guarantee ordering matches input
-        sorted_data = sorted(response.data, key=lambda d: d.index)
-        return [d.embedding for d in sorted_data]
+        vectors: list[list[float]] = []
+        for start in range(0, len(texts), self.BATCH_SIZE):
+            vectors.extend(self._embed_batch(texts[start:start + self.BATCH_SIZE]))
+        return vectors
+
+    def _embed_batch(self, batch: list[str]) -> list[list[float]]:
+        last: Exception | None = None
+        for attempt in range(self.BATCH_ATTEMPTS):
+            try:
+                response = self._client.embeddings.create(
+                    input=batch, model=self.model)
+                # sort by index to guarantee ordering matches input
+                sorted_data = sorted(response.data, key=lambda d: d.index)
+                return [d.embedding for d in sorted_data]
+            except (openai.APIConnectionError, openai.RateLimitError,
+                    openai.InternalServerError) as exc:  # transient only
+                last = exc
+                if attempt + 1 < self.BATCH_ATTEMPTS:
+                    time.sleep(min(2 ** attempt, 8))
+        assert last is not None
+        raise last
 
 
 class CachedEmbedder(Embedder):

@@ -47,12 +47,18 @@ class DocumentTextIngestRequest(BaseModel):
 
 
 class DocumentIngestResponse(BaseModel):
-    document_id: uuid.UUID
+    # None when the upload was queued for background ingestion — the document
+    # row is created by the worker; poll `run_id` for progress instead.
+    document_id: uuid.UUID | None = None
     status: str
-    chunks_created: int
+    chunks_created: int = 0
     # True when the source was already indexed with identical content and
     # nothing was re-processed (ING-04 idempotent no-op).
     reused: bool = False
+    # Background ingestion (large uploads, ING-09): set when the file was
+    # spooled and enqueued to the worker instead of processed inline.
+    run_id: uuid.UUID | None = None
+    background: bool = False
 
 
 class DocumentDeleteResponse(BaseModel):

@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     EMBED_CACHE_TTL: int = 604800     # 7 days
     RETRIEVAL_CACHE_TTL: int = 300    # 5 minutes
 
+    # --- background uploads (ING-09) ---
+    # Uploads larger than this are spooled to disk and ingested by the worker
+    # (bulk lane) so the browser never blocks on parse+embed of big files.
+    UPLOAD_BACKGROUND_THRESHOLD_BYTES: int = 1_000_000
+    UPLOAD_SPOOL_DIR: str = "var/upload_spool"
+
     # --- semantic response cache (CACHE-02) ---
     SEMANTIC_CACHE_ENABLED: bool = False
     SEMANTIC_CACHE_TTL: int = 3600            # 1 hour

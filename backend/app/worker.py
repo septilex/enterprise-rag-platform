@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from pathlib import Path
 
 from app.core.config import settings
 from app.db.base import SessionLocal
@@ -22,6 +23,7 @@ from app.services.jobs import RedisJobQueue
 log = logging.getLogger("rag.worker")
 
 JOB_SYNC_SOURCE = "sync_source"
+JOB_INGEST_UPLOAD = "ingest_upload"
 MAX_ATTEMPTS = 3
 
 
@@ -44,7 +46,7 @@ def _vector_store():
 def handle_job(db, job: dict, embedder, vector_store, cache, queue: RedisJobQueue) -> None:
     """Execute a single job. On failure, retry up to MAX_ATTEMPTS then fail the run."""
     kind = job.get("kind")
-    if kind != JOB_SYNC_SOURCE:
+    if kind not in (JOB_SYNC_SOURCE, JOB_INGEST_UPLOAD):
         log.warning("unknown job kind: %s", kind)
         return
 
@@ -56,12 +58,25 @@ def handle_job(db, job: dict, embedder, vector_store, cache, queue: RedisJobQueu
 
     attempt = int(job.get("attempt", 0))
     try:
-        ingestion_runs.sync_source(
-            db, source, embedder, vector_store, cache=cache,
-            triggered_by=(uuid.UUID(job["triggered_by"]) if job.get("triggered_by") else None),
-            trigger_type=job.get("trigger_type", ingestion_runs.TRIGGER_SCHEDULED),
-            run=run,
-        )
+        if kind == JOB_INGEST_UPLOAD:
+            _ingest_upload(db, job, source, run, embedder, vector_store, cache)
+        else:
+            ingestion_runs.sync_source(
+                db, source, embedder, vector_store, cache=cache,
+                triggered_by=(uuid.UUID(job["triggered_by"]) if job.get("triggered_by") else None),
+                trigger_type=job.get("trigger_type", ingestion_runs.TRIGGER_SCHEDULED),
+                run=run,
+            )
+    except _PermanentJobError as exc:
+        # Unrecoverable (e.g. unparseable upload) — fail the run immediately,
+        # no retries; the failure is visible in Sources & activity (ING-07).
+        db.rollback()
+        log.error("job failed permanently (no retry): %s", exc)
+        run.status = ingestion_runs.STATUS_FAILED
+        run.error_summary = str(exc)[:1000]
+        run.completed_at = ingestion_runs._now()
+        db.commit()
+        _cleanup_spool(job)
     except Exception as exc:  # noqa: BLE001 - worker must not crash
         db.rollback()
         if attempt + 1 < MAX_ATTEMPTS:
@@ -76,6 +91,62 @@ def handle_job(db, job: dict, embedder, vector_store, cache, queue: RedisJobQueu
             run.error_summary = str(exc)[:1000]
             db.commit()
             queue.dead_letter(job)  # DLQ for operator visibility
+            _cleanup_spool(job)
+    else:
+        _cleanup_spool(job)
+
+
+class _PermanentJobError(Exception):
+    """Job failure that must not be retried (bad input, not transient infra)."""
+
+
+def _ingest_upload(db, job: dict, source: Source, run: IngestionRun,
+                   embedder, vector_store, cache) -> None:
+    """Ingest a spooled background upload (ING-09 bulk lane).
+
+    Parse happens here — off the request path — so huge files never block the
+    API. The spool file is removed by the caller once the job leaves the queue
+    for good (success or permanent failure), surviving retries in between.
+    """
+    from app.services import ingestion
+
+    spool_path = Path(job["spool_path"])
+    if not spool_path.exists():
+        raise _PermanentJobError(f"spooled upload missing: {spool_path.name}")
+    raw = spool_path.read_bytes()
+    try:
+        text = ingestion.extract_text_from_upload(
+            job.get("filename") or "", job.get("content_type") or "", raw)
+    except ValueError as exc:
+        raise _PermanentJobError(f"parse failed: {exc}") from exc
+
+    filename = job.get("filename") or f"upload-{run.id}"
+    # ingest_items only applies run_metadata to runs it creates itself, so
+    # stamp the pre-created queued run directly for activity-view visibility.
+    run.run_metadata = {"filename": filename, "background": True}
+    ingestion_runs.ingest_items(
+        db, uuid.UUID(job["tenant_id"]), uuid.UUID(job["collection_id"]),
+        source,
+        items=[{"title": filename, "content": text,
+                "source_uri": f"upload://{filename}",
+                "metadata": job.get("metadata") or {}}],
+        embedder=embedder, vector_store=vector_store,
+        trigger_type=ingestion_runs.TRIGGER_MANUAL,
+        triggered_by=(uuid.UUID(job["triggered_by"]) if job.get("triggered_by") else None),
+        cache=cache,
+        run=run,
+    )
+
+
+def _cleanup_spool(job: dict) -> None:
+    """Best-effort removal of the spooled upload once the job is finished."""
+    path = job.get("spool_path")
+    if not path:
+        return
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError as exc:  # never let cleanup kill the worker loop
+        log.warning("could not remove spool file %s: %s", path, exc)
 
 
 def run_once(queue: RedisJobQueue, embedder, vector_store, cache) -> bool:

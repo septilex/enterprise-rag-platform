@@ -1,6 +1,7 @@
 import json
 import time
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -370,6 +371,7 @@ def upload_document(
     tenant_id: uuid.UUID = Form(...),
     collection_id: uuid.UUID = Form(...),
     session_id: uuid.UUID | None = Form(default=None),
+    background: bool = Form(default=False),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_principal),
@@ -379,19 +381,58 @@ def upload_document(
     The file is decoded as text and run through the idempotent ingest pipeline.
     It is tagged with upload/session metadata so it can be scoped or filtered.
     Non-text/corrupt files are quarantined (ING-07), not silently dropped.
+
+    Large files (> UPLOAD_BACKGROUND_THRESHOLD_BYTES) — or any upload with
+    background=true — are spooled to disk and ingested by the worker on the
+    bulk lane (ING-09), so the request returns immediately with a run_id to
+    poll instead of blocking on parse+embed.
     """
     principal.authorize(tenant_id, collection_id)
     principal.require_role(tenant_id, "editor")
     raw = file.file.read()
+    metadata = {"uploaded": True, "filename": file.filename or "upload"}
+    if session_id is not None:
+        metadata["session_id"] = str(session_id)
+
+    go_background = _job_queue is not None and (
+        background or len(raw) > settings.UPLOAD_BACKGROUND_THRESHOLD_BYTES
+    )
+    if go_background:
+        filename = file.filename or f"upload-{uuid.uuid4()}"
+        spool_dir = Path(settings.UPLOAD_SPOOL_DIR)
+        spool_dir.mkdir(parents=True, exist_ok=True)
+        spool_path = spool_dir / f"{uuid.uuid4().hex}_{Path(filename).name}"
+        spool_path.write_bytes(raw)
+
+        source = ingestion_runs.manual_upload_source(
+            db, tenant_id, collection_id, created_by=principal.user_id)
+        run = ingestion_runs.create_queued_run(
+            db, source, trigger_type=ingestion_runs.TRIGGER_MANUAL,
+            triggered_by=principal.user_id)
+        _job_queue.enqueue({
+            "kind": "ingest_upload",
+            "run_id": str(run.id), "source_id": str(source.id),
+            "tenant_id": str(tenant_id), "collection_id": str(collection_id),
+            "spool_path": str(spool_path), "filename": filename,
+            "content_type": file.content_type or "", "metadata": metadata,
+            "triggered_by": str(principal.user_id) if principal.user_id else None,
+            "attempt": 0,
+        }, bulk=True)
+        _audit(db, tenant_id, principal, "document.upload",
+               {"collection_id": str(collection_id), "filename": filename,
+                "run_id": str(run.id), "mode": "background",
+                "bytes": len(raw)})
+        return DocumentIngestResponse(
+            document_id=None, status="queued", chunks_created=0,
+            run_id=run.id, background=True,
+        )
+
     try:
         text = ingestion.extract_text_from_upload(
             file.filename or "", file.content_type or "", raw
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    metadata = {"uploaded": True, "filename": file.filename or "upload"}
-    if session_id is not None:
-        metadata["session_id"] = str(session_id)
 
     # Manual upload is one source_type routed through the ingestion framework.
     source = ingestion_runs.manual_upload_source(
